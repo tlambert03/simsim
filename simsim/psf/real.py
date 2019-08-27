@@ -2,22 +2,31 @@ import microscPSF.microscPSF as mpsf
 import numpy as np
 
 
-def real_psf(nxy=128, nz=128, dz=0.1625, dxy=0.1625, wvl=0.55, NA=0.8):
-    params = mpsf.m_params.copy()
-    params.update(
-        {
-            "M": 40,
-            "NA": NA,
-            # "ng0": 1.33,  # coverslip RI design value
-            # "ng": 1.33,
-            # "ni0": 1.33,  # immersion medium RI design value
-            # "ni0": 1.33,
-            "tg": 0,
-            "tg0": 0,  # microns, coverslip thickness design value
-            "ti0": 3500,  # microns, working distance design value
-            "zd0": 200.0 * 1.0e3,  # microscope tube length (in microns).
-        }
-    )
+def real_psf(
+    nxy=128,
+    nz=128,
+    dz=0.1625,
+    dxy=0.1625,
+    wvl=0.55,
+    NA=1.42,
+    mag=100,
+    nimm=1.515,
+    sample_ri=1.33,
+    csthick=0.170,
+):
+    params = {
+        "M": mag,  # magnification
+        "NA": NA,  # numerical aperture
+        "ng0": 1.515,  # coverslip RI design value
+        "ng": 1.515,  # coverslip RI experimental value
+        "ni0": 1.515,  # immersion medium RI design value
+        "ni": nimm,  # immersion medium RI experimental value
+        "ns": sample_ri,  # specimen refractive index (RI)
+        "ti0": 150,  # microns, working distance (immersion medium thickness) design value
+        "tg": csthick * 1000,  # microns, coverslip thickness experimental value
+        "tg0": 170,  # microns, coverslip thickness design value
+        "zd0": 200.0 * 1.0e3,  # microscope tube length (in microns).
+    }
     zv = np.arange(-nz // 2, nz // 2) * dz
     psf = mpsf.gLXYZFocalScan(
         params, dxy, nxy, zv, normalize=True, pz=0.0, wvl=wvl, zd=None

@@ -75,27 +75,27 @@ def structillum_2d(
     amp_plus = np.sqrt(1.0 - side_intensity)
     # amp_minus = np.sqrt(side_intensity)
 
-    kvec_arr = kmag * np.array([NA_arr, np.sqrt(1 - NA_arr ** 2)]).transpose()
+    kvec_arr = kmag * np.stack([NA_arr, np.sqrt(1 - NA_arr ** 2)]).transpose()
     plus_side_kvec_arr = (
         kmag
-        * np.array([plus_sideNA_arr, np.sqrt(1 - plus_sideNA_arr ** 2)]).transpose()
+        * np.stack([plus_sideNA_arr, np.sqrt(1 - plus_sideNA_arr ** 2)]).transpose()
     )
     minus_side_kvec_arr = (
         kmag
-        * np.array([minus_sideNA_arr, np.sqrt(1 - minus_sideNA_arr ** 2)]).transpose()
+        * np.stack([minus_sideNA_arr, np.sqrt(1 - minus_sideNA_arr ** 2)]).transpose()
     )
 
     for i in range(nangles + 1):
         # construct intensity field over all triplets (or sextets in I5S)
         # print "i=",i
         # amplitude[:]=0j
-        #         kvec = kmag * np.array([np.sin(theta_arr[i]), np.cos(theta_arr[i])])
+        #         kvec = kmag * np.stack([np.sin(theta_arr[i]), np.cos(theta_arr[i])])
         # amplitude += expfield_2d(kvec, zarr, xarr, dx, dz)
         amplitude[0] = (
             amp_plus * expfield_2d(kvec_arr[i], zarr, xarr, dx, dz) * ampcenter
         )
 
-        # kvec = kmag * np.array([np.sin(plus_sidetheta_arr[i]),
+        # kvec = kmag * np.stack([np.sin(plus_sidetheta_arr[i]),
         #                        np.cos(plus_sidetheta_arr[i])])
         # amplitude += expfield_2d(kvec, zarr, xarr, dx, dz) * ampratio
         amplitude[2] = (
@@ -189,7 +189,10 @@ def structillum_3d(
 
         for a, angle in enumerate(angles):
             print(f"p: {p}, a: {a}")
-            rotatedillum = rotate(ill_3d, np.rad2deg(angle), mode="linear")
+            if angle == 0:
+                rotatedillum = ill_3d
+            else:
+                rotatedillum = rotate(ill_3d, np.rad2deg(angle), mode="linear").get()
             out[a, p] = crop_center(rotatedillum, nx, ny)
     return out
 

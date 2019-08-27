@@ -1,12 +1,15 @@
+import pycuda.autoinit
 from pycuda.compiler import SourceModule
 import pycuda.driver as cuda
-from pycuda.gpuarray import GPUArray
+from pycuda import gpuarray
 import numpy as np
+import logging
 
+logger = logging.getLogger(__name__)
 
 mod_affine = SourceModule(
     """
-    #include <stdio.h>
+    //#include <stdio.h>
 
     texture<float, cudaTextureType3D, cudaReadModeElementType> texRef;
 
@@ -80,19 +83,47 @@ mod_affine = SourceModule(
     """
 )
 
-affine = mod_affine.get_function("transformKernel")
+_affine = mod_affine.get_function("transformKernel")
 affineRA = mod_affine.get_function("transformKernelRA")
 texref = mod_affine.get_texref("texRef")
 
 
+def with_cupy_conversion(func):
+    def wrapper(*args, **kwargs):
+        args = list(args)
+        array = args[0]
+        if (
+            f"{type(array).__module__}.{type(array).__name__}"
+            == "cupy.core.core.ndarray"
+        ):
+            print("converting from cupy array to pycuda array")
+            array = array.get()
+            pycuda.autoinit.context.push()
+            array = gpuarray.to_gpu(array)
+            args[0] = array
+            v = func(*args, **kwargs)
+            pycuda.autoinit.context.pop()
+            return v
+        return func(*args, **kwargs)
+    return wrapper
+
+
 def _bind_tex(array):
+    pop = False
+    if f"{type(array).__module__}.{type(array).__name__}" == "cupy.core.core.ndarray":
+        print("converting from cupy array to pycuda array")
+        array = array.get()
+        pycuda.autoinit.context.push()
+        pop = True
     if isinstance(array, np.ndarray):
         ary = cuda.np_to_array(array, "F" if np.isfortran(array) else "C")
-    elif isinstance(array, GPUArray):
+    elif isinstance(array, gpuarray.GPUArray):
         ary = cuda.gpuarray_to_array(array, "F" if array.flags.f_contiguous else "C")
     else:
         raise ValueError("Can only bind numpy arrays or GPUarray")
     texref.set_array(ary)
+    if pop:
+        pycuda.autoinit.context.pop()
 
 
 def _set_tex_filter_mode(mode):
@@ -164,6 +195,7 @@ def _make_rotation_matrix(array, angle, axis=0):
     return T
 
 
+@with_cupy_conversion
 def scale(array, scalar=(1, 1, 1), mode="nearest", blocks=(16, 16, 4)):
     """scale array with nearest neighbors or linear interpolation
 
@@ -186,12 +218,12 @@ def scale(array, scalar=(1, 1, 1), mode="nearest", blocks=(16, 16, 4)):
     out_z = round(array.shape[0] * scalar[0])
     out_y = round(array.shape[1] * scalar[1])
     out_x = round(array.shape[2] * scalar[2])
-    output = np.zeros((out_z, out_y, out_x), dtype=np.float32)
+    output = gpuarray.empty((out_z, out_y, out_x), dtype=np.float32)
 
     bx, by, bz = blocks
     grid = ((out_x + bx - 1) // bx, (out_y + by - 1) // by, (out_z + bz - 1) // bz)
 
-    affine(
+    _affine(
         cuda.Out(output),
         np.int32(out_x),
         np.int32(out_y),
@@ -204,6 +236,7 @@ def scale(array, scalar=(1, 1, 1), mode="nearest", blocks=(16, 16, 4)):
     return output
 
 
+@with_cupy_conversion
 def rotate(array, angle, axis=0, mode="nearest", blocks=(16, 16, 4)):
     """rotate array around a single axis
 
@@ -220,12 +253,12 @@ def rotate(array, angle, axis=0, mode="nearest", blocks=(16, 16, 4)):
     _set_tex_filter_mode(mode)
 
     out_z, out_y, out_x = array.shape
-    output = np.zeros((out_z, out_y, out_x), dtype=np.float32)
+    output = gpuarray.empty((out_z, out_y, out_x), dtype=np.float32)
     bx, by, bz = blocks
     grid = ((out_x + bx - 1) // bx, (out_y + by - 1) // by, (out_z + bz - 1) // bz)
 
-    affine(
-        cuda.Out(output),
+    _affine(
+        output,
         np.int32(out_x),
         np.int32(out_y),
         np.int32(out_z),
@@ -237,6 +270,7 @@ def rotate(array, angle, axis=0, mode="nearest", blocks=(16, 16, 4)):
     return output
 
 
+@with_cupy_conversion
 def translate(array, mag=(0, 0, 0), mode="nearest", blocks=(16, 16, 4)):
     """translate array
 
@@ -255,12 +289,47 @@ def translate(array, mag=(0, 0, 0), mode="nearest", blocks=(16, 16, 4)):
     _set_tex_filter_mode(mode)
 
     out_z, out_y, out_x = array.shape
-    output = np.zeros((out_z, out_y, out_x), dtype=np.float32)
+    output = gpuarray.empty((out_z, out_y, out_x), dtype=np.float32)
     bx, by, bz = blocks
     grid = ((out_x + bx - 1) // bx, (out_y + by - 1) // by, (out_z + bz - 1) // bz)
 
-    affine(
-        cuda.Out(output),
+    _affine(
+        output,
+        np.int32(out_x),
+        np.int32(out_y),
+        np.int32(out_z),
+        cuda.In(tmat.astype(np.float32).ravel()),
+        texrefs=[texref],
+        block=blocks,
+        grid=grid,
+    )
+    return output
+
+
+@with_cupy_conversion
+def affine(array, tmat, mode="nearest", blocks=(16, 16, 4)):
+    """translate array
+
+    mag is number of pixels to translate in (z,y,x)
+    must be tuple with length array.ndim
+    """
+    _dtype = array.dtype
+    if not _dtype == np.float32:
+        array = array.astype(np.float32)
+
+    assert tmat.shape == (4, 4), "transformation matrix must have shape (4, 4)"
+
+    # bind array to textureRef
+    _bind_tex(array)
+    _set_tex_filter_mode(mode)
+
+    out_z, out_y, out_x = array.shape
+    output = gpuarray.empty((out_z, out_y, out_x), dtype=np.float32)
+    bx, by, bz = blocks
+    grid = ((out_x + bx - 1) // bx, (out_y + by - 1) // by, (out_z + bz - 1) // bz)
+
+    _affine(
+        output,
         np.int32(out_x),
         np.int32(out_y),
         np.int32(out_z),
