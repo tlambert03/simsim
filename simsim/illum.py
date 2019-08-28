@@ -7,6 +7,17 @@ def expfield_2d(kvec, zarr, xarr, dx, dz):
     return field
 
 
+def _single_period(*args, **kwargs):
+    resolution = 100
+    _dz = kwargs.get("dz", 0.01)
+    kwargs["linespacing"] = kwargs.get("linespacing", 0.2035)
+    kwargs["dx"] = kwargs["linespacing"] / resolution
+    kwargs["dz"] = kwargs["dx"]
+    args = list(args)
+    args[0] = (int(args[0][0] * _dz / kwargs["dz"]), 2 * resolution)
+    return structillum_2d(*args, **kwargs), kwargs["dx"]
+
+
 def structillum_2d(
     shape,
     dx=0.01,
