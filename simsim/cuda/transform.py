@@ -3,10 +3,18 @@ from pycuda.compiler import SourceModule
 import pycuda.driver as cuda
 from pycuda import gpuarray
 import numpy as np
+import os
 
-
+cubic_dir = os.path.join(os.path.dirname(__file__), "cubic")
 with open(__file__.replace(".py", ".cu"), "r") as f:
-    mod_affine = SourceModule(f.read())
+    mod_affine = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
+
+with open(os.path.join(cubic_dir, "cubicPrefilter2D.cu"), "r") as f:
+    modcubic2 = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
+
+with open(os.path.join(cubic_dir, "cubicPrefilter3D.cu"), "r") as f:
+    modcubic3 = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
+
 
 _affine2D = mod_affine.get_function("affine2D")
 _affine2D_RA = mod_affine.get_function("affine2D_RA")
@@ -19,6 +27,13 @@ texref3D = mod_affine.get_texref("texref3d")
 texref3D.set_address_mode(0, cuda.address_mode.BORDER)
 texref3D.set_address_mode(1, cuda.address_mode.BORDER)
 texref3D.set_address_mode(2, cuda.address_mode.BORDER)
+
+s2c2dx = modcubic2.get_function("SamplesToCoefficients2DX")
+s2c2dy = modcubic2.get_function("SamplesToCoefficients2DY")
+
+s2c3dx = modcubic3.get_function("SamplesToCoefficients3DX")
+s2c3dy = modcubic3.get_function("SamplesToCoefficients3DY")
+s2c3dz = modcubic3.get_function("SamplesToCoefficients3DZ")
 
 
 def _bind_tex(array):
@@ -38,8 +53,10 @@ def _bind_tex(array):
 def _set_tex_filter_mode(mode, ndim):
     assert mode in [
         "linear",
-        "point",
+        "point",  # aka nearest neighbor
         "nearest",
+        "cubic",
+        "cubic-prefilter",
     ], f"unrecognized interpolation mode: {mode}"
     if mode == "linear":
         # default is point
@@ -56,6 +73,11 @@ def _with_bound_texture(func):
         # so far these all require float32
         if not array.dtype == np.float32:
             array = array.astype(np.float32)
+        kmode = kwargs.get("mode", "")
+        if ("pre" in kmode and "cub" in kmode) or any(
+            [("pre" in x and "cub" in x) for x in args if isinstance(x, str)]
+        ):
+            array = cubic_bspline_prefilter(array)
         # bind array to textureRef
         _bind_tex(array)
         args[0] = array
@@ -144,7 +166,7 @@ def _make_grid(shape, blocks):
         return ((out_x + bx - 1) // bx, (out_y + by - 1) // by, 1)
 
 
-def _do_affine(shape, tmat, blocks):
+def _do_affine(shape, tmat, mode, blocks):
     if len(shape) == 3:
         if not tmat.shape == (4, 4):
             raise ValueError(f"3D transformation matrix must be 4x4, saw {tmat.shape}")
@@ -157,13 +179,15 @@ def _do_affine(shape, tmat, blocks):
         _tref = texref2D
 
     output = gpuarray.empty(shape, dtype=np.float32)
+    grid = _make_grid(shape, blocks)
     _func(
         output,
         *np.flip(np.int32(output.shape)),
         cuda.In(tmat.astype(np.float32).ravel()),
+        np.int32("cubic" in mode.lower()),
         texrefs=[_tref],
         block=blocks,
-        grid=_make_grid(shape, blocks),
+        grid=grid,
     )
     return output
 
@@ -177,14 +201,13 @@ def scale(array, scalar, mode="nearest", blocks=(16, 16, 4)):
     if isinstance(scalar, (int, float)):
         scalar = tuple([scalar] * array.ndim)
     assert (
-        len(shift) == array.ndim
+        len(scalar) == array.ndim
     ), "scalar must either be a scalar or a list with the same length as array.ndim"
 
     # make scaling array
     tmat = _make_scaling_matrix(scalar)
-
-    outshape = tuple(np.round(np.array(array.shape) * scalar).astype(np.int))
-    return _do_affine(outshape, tmat, blocks)
+    outshape = tuple(int(x) for x in np.round(np.array(array.shape) * scalar))
+    return _do_affine(outshape, tmat, mode, blocks)
 
 
 @_with_bound_texture
@@ -194,7 +217,7 @@ def rotate(array, angle, axis=0, mode="nearest", blocks=(16, 16, 4)):
     axis can be either 0,1,2 or z,y,x
     """
     tmat = _make_rotation_matrix(array, angle, axis)
-    return _do_affine(array.shape, tmat, blocks)
+    return _do_affine(array.shape, tmat, mode, blocks)
 
 
 @_with_bound_texture
@@ -211,7 +234,7 @@ def shift(array, shift, mode="nearest", blocks=(16, 16, 4)):
     ), "shift must either be a scalar or a list with the same length as array.ndim"
 
     tmat = _make_translation_matrix(shift)
-    return _do_affine(array.shape, tmat, blocks)
+    return _do_affine(array.shape, tmat, mode, blocks)
 
 
 @_with_bound_texture
@@ -221,4 +244,49 @@ def affine(array, tmat, mode="nearest", blocks=(16, 16, 4)):
     mag is number of pixels to translate in (z,y,x)
     must be tuple with length array.ndim
     """
-    return _do_affine(array.shape, tmat, blocks)
+    return _do_affine(array.shape, tmat, mode, blocks)
+
+
+def pow2divider(num):
+    if num == 0:
+        return 0
+    divider = 1
+    while (num & divider) == 0:
+        divider <<= 1
+    return divider
+
+
+def _cubic_bspline_prefilter_3D(array):
+    ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
+    depth, height, width = np.int32(array.shape)
+    pitch = np.int32(width * 4)  # width of a row in the image in bytes
+    dimX = np.int32(min(min(pow2divider(width), pow2divider(height)), 64))
+    dimY = np.int32(min(min(pow2divider(depth), pow2divider(height)), 512 / dimX))
+    blocks = (int(dimX), int(dimY), 1)
+    gridX = (int(height // dimX), int(depth // dimY), 1)
+    gridY = (int(width // dimX), int(depth // dimY), 1)
+    gridZ = (int(width // dimX), int(height // dimY), 1)
+    s2c3dx(ary_gpu, pitch, width, height, depth, block=blocks, grid=gridX)
+    s2c3dy(ary_gpu, pitch, width, height, depth, block=blocks, grid=gridY)
+    s2c3dz(ary_gpu, pitch, width, height, depth, block=blocks, grid=gridZ)
+    return ary_gpu
+
+
+def _cubic_bspline_prefilter_2D(array):
+    ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
+    height, width = np.int32(array.shape)
+    pitch = np.int32(width * 4)  # width of a row in the image in bytes
+    blockx = (int(min(pow2divider(height), 64)), 1, 1)
+    blocky = (int(min(pow2divider(width), 64)), 1, 1)
+    gridX = (int(height // blockx[0]), 1, 1)
+    gridY = (int(width // blocky[0]), 1, 1)
+    s2c2dx(ary_gpu, pitch, width, height, block=blockx, grid=gridX)
+    s2c2dy(ary_gpu, pitch, width, height, block=blocky, grid=gridY)
+    return ary_gpu
+
+
+def cubic_bspline_prefilter(array):
+    if array.ndim == 2:
+        return _cubic_bspline_prefilter_2D(array)
+    elif array.ndim == 3:
+        return _cubic_bspline_prefilter_3D(array)
