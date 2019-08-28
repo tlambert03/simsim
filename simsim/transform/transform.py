@@ -309,7 +309,7 @@ def _cubic_bspline_prefilter_2D(ary_gpu):
 
 
 def spline_filter(array):
-    if not isinstance(gpuarray.GPUArray, array):
+    if not isinstance(array, gpuarray.GPUArray):
         ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
     if array.ndim == 2:
         return _cubic_bspline_prefilter_2D(ary_gpu)
