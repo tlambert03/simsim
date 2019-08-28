@@ -65,17 +65,6 @@ def _with_bound_texture(func):
     return wrapper
 
 
-def _make_grid(shape, blocks):
-    if len(shape) == 3:
-        out_z, out_y, out_x = shape
-        bx, by, bz = blocks
-        return ((out_x + bx - 1) // bx, (out_y + by - 1) // by, (out_z + bz - 1) // bz)
-    elif len(shape) == 2:
-        out_y, out_x = shape
-        bx, by = blocks[:2]
-        return ((out_x + bx - 1) // bx, (out_y + by - 1) // by, 1)
-
-
 def _make_translation_matrix(mag):
     if len(mag) == 3:
         tmat = np.eye(4)
@@ -104,52 +93,58 @@ def _make_scaling_matrix(scalar):
 
 def _make_rotation_matrix(array, angle, axis=0):
     theta = angle * np.pi / 180
-    nz, ny, nx = array.shape
-    # first translate the middle of the image to the origin
-    T1 = np.array(
-        [[1, 0, 0, nx / 2], [0, 1, 0, ny / 2], [0, 0, 1, nz / 2], [0, 0, 0, 1]]
-    )
-    # then rotate theta degrees about the Y axis
-    if axis in (0, "z", "Z"):
-        R = np.array(
-            [
-                [np.cos(theta), np.sin(theta), 0, 0],
-                [-np.sin(theta), np.cos(theta), 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1],
-            ]
+    _sin = np.sin(theta)
+    _cos = np.cos(theta)
+    if array.ndim == 3:
+        nz, ny, nx = array.shape
+        # first translate the middle of the image to the origin
+        T1 = np.array(
+            [[1, 0, 0, nx / 2], [0, 1, 0, ny / 2], [0, 0, 1, nz / 2], [0, 0, 0, 1]]
         )
-    elif axis in (1, "y", "Y"):
-        R = np.array(
-            [
-                [np.cos(theta), 0, -np.sin(theta), 0],
-                [0, 1, 0, 0],
-                [np.sin(theta), 0, np.cos(theta), 0],
-                [0, 0, 0, 1],
-            ]
+        # then rotate theta degrees about the Y axis
+        if axis in (0, "z", "Z"):
+            R = np.array(
+                [[_cos, _sin, 0, 0], [-_sin, _cos, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+            )
+        elif axis in (1, "y", "Y"):
+            R = np.array(
+                [[_cos, 0, -_sin, 0], [0, 1, 0, 0], [_sin, 0, _cos, 0], [0, 0, 0, 1]]
+            )
+        elif axis in (2, "x", "X"):
+            R = np.array(
+                [[1, 0, 0, 0], [0, _cos, _sin, 0], [0, -_sin, _cos, 0], [0, 0, 0, 1]]
+            )
+        else:
+            raise ValueError("Unrecognized axis of rotation: {}".format(axis))
+        # then translate back to the original origin
+        T2 = np.array(
+            [[1, 0, 0, -nx / 2], [0, 1, 0, -ny / 2], [0, 0, 1, -nz / 2], [0, 0, 0, 1]]
         )
-    elif axis in (2, "x", "X"):
-        R = np.array(
-            [
-                [1, 0, 0, 0],
-                [0, np.cos(theta), np.sin(theta), 0],
-                [0, -np.sin(theta), np.cos(theta), 0],
-                [0, 0, 0, 1],
-            ]
-        )
-    else:
-        raise ValueError("Unrecognized axis of rotation: {}".format(axis))
-    # then translate back to the original origin
-    T2 = np.array(
-        [[1, 0, 0, -nx / 2], [0, 1, 0, -ny / 2], [0, 0, 1, -nz / 2], [0, 0, 0, 1]]
-    )
+        return np.dot(np.dot(np.dot(np.eye(4), T1), R), T2)
+    if array.ndim == 2:
+        ny, nx = array.shape
+        # first translate the middle of the image to the origin
+        T1 = np.array([[1, 0, nx / 2], [0, 1, ny / 2], [0, 0, 1]])
+        # then rotate theta degrees
+        R = np.array([[_cos, -_sin, 0], [_sin, _cos, 0], [0, 0, 1]])
+        # then translate back to the original origin
+        T2 = np.array([[1, 0, -nx / 2], [0, 1, -ny / 2], [0, 0, 1]])
+        return np.dot(np.dot(np.dot(np.eye(3), T1), R), T2)
+    raise ValueError("Can only do 2D and 3D rotations")
 
-    T = np.dot(np.dot(np.dot(np.eye(4), T1), R), T2)
-    return T
+
+def _make_grid(shape, blocks):
+    if len(shape) == 3:
+        out_z, out_y, out_x = shape
+        bx, by, bz = blocks
+        return ((out_x + bx - 1) // bx, (out_y + by - 1) // by, (out_z + bz - 1) // bz)
+    elif len(shape) == 2:
+        out_y, out_x = shape
+        bx, by = blocks[:2]
+        return ((out_x + bx - 1) // bx, (out_y + by - 1) // by, 1)
 
 
 def _do_affine(shape, tmat, blocks):
-
     if len(shape) == 3:
         if not tmat.shape == (4, 4):
             raise ValueError(f"3D transformation matrix must be 4x4, saw {tmat.shape}")
