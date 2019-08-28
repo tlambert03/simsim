@@ -136,9 +136,7 @@ def structillum_3d(
 
     # adding a single pixel to z and removing to make focal plane centered
     shape_2d = (shape[0] + 1, int(np.ceil(shape[1] * 1.55)))
-    ill_2d = (
-        structillum_2d(shape_2d, *args, **kwargs).sum(0)[:-1].astype(xp.float32).get()
-    )
+    ill_2d = structillum_2d(shape_2d, *args, **kwargs).sum(0)[:-1]
     # ill_3d = xp.repeat(ill_2d[:, :, xp.newaxis], np.int(shape[2] * np.sqrt(2)), axis=2)
 
     # ndimage.rotate(ill_3d, 45, (1, 2))
