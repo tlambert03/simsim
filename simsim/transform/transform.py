@@ -1,39 +1,50 @@
-import pycuda.autoinit  # noqa
 from pycuda.compiler import SourceModule
 import pycuda.driver as cuda
 from pycuda import gpuarray
 import numpy as np
 import os
 
+import pycuda.autoinit  # noqa
+
 cubic_dir = os.path.join(os.path.dirname(__file__), "cubic")
 with open(__file__.replace(".py", ".cu"), "r") as f:
     mod_affine = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
-
-with open(os.path.join(cubic_dir, "cubicPrefilter2D.cu"), "r") as f:
-    modcubic2 = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
-
-with open(os.path.join(cubic_dir, "cubicPrefilter3D.cu"), "r") as f:
-    modcubic3 = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
-
 
 _affine2D = mod_affine.get_function("affine2D")
 _affine2D_RA = mod_affine.get_function("affine2D_RA")
 _affine3D = mod_affine.get_function("affine3D")
 _affine3D_RA = mod_affine.get_function("affine3D_RA")
 texref2D = mod_affine.get_texref("texref2d")
+texref3D = mod_affine.get_texref("texref3d")
 texref2D.set_address_mode(0, cuda.address_mode.BORDER)
 texref2D.set_address_mode(1, cuda.address_mode.BORDER)
-texref3D = mod_affine.get_texref("texref3d")
 texref3D.set_address_mode(0, cuda.address_mode.BORDER)
 texref3D.set_address_mode(1, cuda.address_mode.BORDER)
 texref3D.set_address_mode(2, cuda.address_mode.BORDER)
 
-s2c2dx = modcubic2.get_function("SamplesToCoefficients2DX")
-s2c2dy = modcubic2.get_function("SamplesToCoefficients2DY")
 
-s2c3dx = modcubic3.get_function("SamplesToCoefficients3DX")
-s2c3dy = modcubic3.get_function("SamplesToCoefficients3DY")
-s2c3dz = modcubic3.get_function("SamplesToCoefficients3DZ")
+s2c2dx = None
+s2c2dy = None
+s2c3dx = None
+s2c3dy = None
+s2c3dz = None
+
+
+def import_prefilter_2D():
+    global s2c2dx, s2c2dy
+    with open(os.path.join(cubic_dir, "cubicPrefilter2D.cu"), "r") as f:
+        modcubic2 = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
+    s2c2dx = modcubic2.get_function("SamplesToCoefficients2DX")
+    s2c2dy = modcubic2.get_function("SamplesToCoefficients2DY")
+
+
+def import_prefilter_3D():
+    global s2c3dx, s2c3dy, s2c3dz
+    with open(os.path.join(cubic_dir, "cubicPrefilter3D.cu"), "r") as f:
+        modcubic3 = SourceModule(f.read(), no_extern_c=True, include_dirs=[cubic_dir])
+    s2c3dx = modcubic3.get_function("SamplesToCoefficients3DX")
+    s2c3dy = modcubic3.get_function("SamplesToCoefficients3DY")
+    s2c3dz = modcubic3.get_function("SamplesToCoefficients3DZ")
 
 
 def _bind_tex(array):
@@ -77,7 +88,7 @@ def _with_bound_texture(func):
         if ("pre" in kmode and "cub" in kmode) or any(
             [("pre" in x and "cub" in x) for x in args if isinstance(x, str)]
         ):
-            array = cubic_bspline_prefilter(array)
+            array = _cubic_bspline_prefilter(array)
         # bind array to textureRef
         _bind_tex(array)
         args[0] = array
@@ -87,7 +98,7 @@ def _with_bound_texture(func):
     return wrapper
 
 
-def _make_translation_matrix(mag):
+def make_translation_matrix(mag):
     if len(mag) == 3:
         tmat = np.eye(4)
         tmat[0, 3] = mag[2]
@@ -100,7 +111,7 @@ def _make_translation_matrix(mag):
     return tmat
 
 
-def _make_scaling_matrix(scalar):
+def make_scaling_matrix(scalar):
     if len(scalar) == 3:
         tmat = np.eye(4)
         tmat[0, 0] = 1 / scalar[2]
@@ -113,7 +124,7 @@ def _make_scaling_matrix(scalar):
     return tmat
 
 
-def _make_rotation_matrix(array, angle, axis=0):
+def make_rotation_matrix(array, angle, axis=0):
     theta = angle * np.pi / 180
     _sin = np.sin(theta)
     _cos = np.cos(theta)
@@ -193,7 +204,7 @@ def _do_affine(shape, tmat, mode, blocks):
 
 
 @_with_bound_texture
-def scale(array, scalar, mode="nearest", blocks=(16, 16, 4)):
+def zoom(array, scalar, mode="nearest", blocks=(16, 16, 4)):
     """scale array with nearest neighbors or linear interpolation
 
     scale can be either a scalar or a tuple with len(scale) == array.ndim
@@ -205,7 +216,7 @@ def scale(array, scalar, mode="nearest", blocks=(16, 16, 4)):
     ), "scalar must either be a scalar or a list with the same length as array.ndim"
 
     # make scaling array
-    tmat = _make_scaling_matrix(scalar)
+    tmat = make_scaling_matrix(scalar)
     outshape = tuple(int(x) for x in np.round(np.array(array.shape) * scalar))
     return _do_affine(outshape, tmat, mode, blocks)
 
@@ -216,7 +227,7 @@ def rotate(array, angle, axis=0, mode="nearest", blocks=(16, 16, 4)):
 
     axis can be either 0,1,2 or z,y,x
     """
-    tmat = _make_rotation_matrix(array, angle, axis)
+    tmat = make_rotation_matrix(array, angle, axis)
     return _do_affine(array.shape, tmat, mode, blocks)
 
 
@@ -233,7 +244,7 @@ def shift(array, shift, mode="nearest", blocks=(16, 16, 4)):
         len(shift) == array.ndim
     ), "shift must either be a scalar or a list with the same length as array.ndim"
 
-    tmat = _make_translation_matrix(shift)
+    tmat = make_translation_matrix(shift)
     return _do_affine(array.shape, tmat, mode, blocks)
 
 
@@ -257,6 +268,8 @@ def pow2divider(num):
 
 
 def _cubic_bspline_prefilter_3D(array):
+    if s2c3dx is None:
+        import_prefilter_3D()
     ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
     depth, height, width = np.int32(array.shape)
     pitch = np.int32(width * 4)  # width of a row in the image in bytes
@@ -273,6 +286,8 @@ def _cubic_bspline_prefilter_3D(array):
 
 
 def _cubic_bspline_prefilter_2D(array):
+    if s2c2dx is None:
+        import_prefilter_2D()
     ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
     height, width = np.int32(array.shape)
     pitch = np.int32(width * 4)  # width of a row in the image in bytes
@@ -285,7 +300,7 @@ def _cubic_bspline_prefilter_2D(array):
     return ary_gpu
 
 
-def cubic_bspline_prefilter(array):
+def _cubic_bspline_prefilter(array):
     if array.ndim == 2:
         return _cubic_bspline_prefilter_2D(array)
     elif array.ndim == 3:
