@@ -88,7 +88,7 @@ def _with_bound_texture(func):
         if ("pre" in kmode and "cub" in kmode) or any(
             [("pre" in x and "cub" in x) for x in args if isinstance(x, str)]
         ):
-            array = _cubic_bspline_prefilter(array)
+            array = spline_filter(array)
         # bind array to textureRef
         _bind_tex(array)
         args[0] = array
@@ -204,58 +204,68 @@ def _do_affine(shape, tmat, mode, blocks):
 
 
 @_with_bound_texture
-def zoom(array, scalar, mode="nearest", blocks=(16, 16, 4)):
+def zoom(input, zoom, mode="nearest", blocks=(16, 16, 4)):
     """scale array with nearest neighbors or linear interpolation
 
-    scale can be either a scalar or a tuple with len(scale) == array.ndim
+    If a float, `zoom` is the same for each axis. If a sequence,
+    `zoom` should contain one value for each axis.
     """
-    if isinstance(scalar, (int, float)):
-        scalar = tuple([scalar] * array.ndim)
+    if isinstance(zoom, (int, float)):
+        zoom = tuple([zoom] * input.ndim)
     assert (
-        len(scalar) == array.ndim
+        len(zoom) == input.ndim
     ), "scalar must either be a scalar or a list with the same length as array.ndim"
 
     # make scaling array
-    tmat = make_scaling_matrix(scalar)
-    outshape = tuple(int(x) for x in np.round(np.array(array.shape) * scalar))
+    tmat = make_scaling_matrix(zoom)
+    outshape = tuple(int(x) for x in np.round(np.array(input.shape) * zoom))
     return _do_affine(outshape, tmat, mode, blocks)
 
 
 @_with_bound_texture
-def rotate(array, angle, axis=0, mode="nearest", blocks=(16, 16, 4)):
-    """rotate array around a single axis
+def rotate(input, angle, axis=0, mode="nearest", blocks=(16, 16, 4)):
+    """Rotate an array.
 
     axis can be either 0,1,2 or z,y,x
     """
-    tmat = make_rotation_matrix(array, angle, axis)
-    return _do_affine(array.shape, tmat, mode, blocks)
+    tmat = make_rotation_matrix(input, angle, axis)
+    return _do_affine(input.shape, tmat, mode, blocks)
 
 
 @_with_bound_texture
-def shift(array, shift, mode="nearest", blocks=(16, 16, 4)):
+def shift(input, shift, mode="nearest", blocks=(16, 16, 4)):
     """translate array
 
     mag is number of pixels to translate in (z,y,x)
     must be tuple with length array.ndim
     """
     if isinstance(shift, (int, float)):
-        shift = tuple([shift] * array.ndim)
+        shift = tuple([shift] * input.ndim)
     assert (
-        len(shift) == array.ndim
+        len(shift) == input.ndim
     ), "shift must either be a scalar or a list with the same length as array.ndim"
 
     tmat = make_translation_matrix(shift)
-    return _do_affine(array.shape, tmat, mode, blocks)
+    return _do_affine(input.shape, tmat, mode, blocks)
 
 
 @_with_bound_texture
-def affine(array, tmat, mode="nearest", blocks=(16, 16, 4)):
-    """translate array
+def affine_transform(input, matrix, mode="nearest", blocks=(16, 16, 4)):
+    """Apply an affine transformation.
 
-    mag is number of pixels to translate in (z,y,x)
-    must be tuple with length array.ndim
+    Args:
+        input (pycuda.gpuarray): The input array.
+        matrix (pycuda.gpuarray): The inverse coordinate transformation matrix,
+            mapping output coordinates to input coordinates. If ``ndim`` is the
+            number of dimensions of ``input``, the given matrix must be of shape
+            ``(ndim + 1, ndim + 1)``: (assume that the transformation is
+            specified using homogeneous coordinates).
+        mode (str): type of interpolation ('nearest', 'linear', 'cubic', 'cubic-prefilter')
+    Returns:
+        pycuda.gpuarray
+    .. seealso:: :func:`scipy.ndimage.affine_transform`
     """
-    return _do_affine(array.shape, tmat, mode, blocks)
+    return _do_affine(input.shape, matrix, mode, blocks)
 
 
 def pow2divider(num):
@@ -267,11 +277,10 @@ def pow2divider(num):
     return divider
 
 
-def _cubic_bspline_prefilter_3D(array):
+def _cubic_bspline_prefilter_3D(ary_gpu):
     if s2c3dx is None:
         import_prefilter_3D()
-    ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
-    depth, height, width = np.int32(array.shape)
+    depth, height, width = np.int32(ary_gpu.shape)
     pitch = np.int32(width * 4)  # width of a row in the image in bytes
     dimX = np.int32(min(min(pow2divider(width), pow2divider(height)), 64))
     dimY = np.int32(min(min(pow2divider(depth), pow2divider(height)), 512 / dimX))
@@ -285,11 +294,10 @@ def _cubic_bspline_prefilter_3D(array):
     return ary_gpu
 
 
-def _cubic_bspline_prefilter_2D(array):
+def _cubic_bspline_prefilter_2D(ary_gpu):
     if s2c2dx is None:
         import_prefilter_2D()
-    ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
-    height, width = np.int32(array.shape)
+    height, width = np.int32(ary_gpu.shape)
     pitch = np.int32(width * 4)  # width of a row in the image in bytes
     blockx = (int(min(pow2divider(height), 64)), 1, 1)
     blocky = (int(min(pow2divider(width), 64)), 1, 1)
@@ -300,8 +308,10 @@ def _cubic_bspline_prefilter_2D(array):
     return ary_gpu
 
 
-def _cubic_bspline_prefilter(array):
+def spline_filter(array):
+    if not isinstance(gpuarray.GPUArray, array):
+        ary_gpu = gpuarray.to_gpu(np.ascontiguousarray(array).astype(np.float32))
     if array.ndim == 2:
-        return _cubic_bspline_prefilter_2D(array)
+        return _cubic_bspline_prefilter_2D(ary_gpu)
     elif array.ndim == 3:
-        return _cubic_bspline_prefilter_3D(array)
+        return _cubic_bspline_prefilter_3D(ary_gpu)
