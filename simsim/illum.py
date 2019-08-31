@@ -172,7 +172,7 @@ def structillum_3d(
     *args,
     **kwargs,
 ):
-    from .cuda.transform import rotate
+    from .transform import rotate
 
     if isinstance(angles, (int, float)):
         # if a single number is provided, assume it is the first of three
