@@ -58,7 +58,8 @@ def structillum_2d(
     plus_sideNA_arr = (0.5 / linespacing + kmag * NA_arr) / kmag
     minus_sideNA_arr = -plus_sideNA_arr[::-1]
 
-    intensity = gpuarray.zeros((3, nz + extraz, nx), np.float32)
+    # intensity = gpuarray.zeros((3, nz + extraz, nx), np.float32)
+    intensity = gpuarray.zeros((nz + extraz, nx), np.float32)
 
     amp = gpuarray.zeros((6, nz + extraz, nx), np.complex64)
     zarr, xarr = np.indices((nz + extraz, nx), np.float32)
@@ -86,17 +87,17 @@ def structillum_2d(
         amp[2] = amp_plus * efield(kvec_arr_plus[i], zarr, xarr, dx, dz) * ampratio
         amp[4] = amp_plus * efield(kvec_arr_minus[i], zarr, xarr, dx, dz) * ampratio
 
-        intensity[0] += (
+        intensity += (
             (amp[0] * amp[0].conj() + amp[2] * amp[2].conj() + amp[4] * amp[4].conj())
             * wght
         ).real
-        intensity[1] += (
+        intensity += (
             2 * (amp[0] * amp[2].conj() + amp[0] * amp[4].conj()).real * wght
         )
-        intensity[2] += 2 * (amp[2] * amp[4].conj()).real * wght
+        intensity += 2 * (amp[2] * amp[4].conj()).real * wght
 
     del amp
-    intensity = intensity.get()
+
     if extraz > 0:
         aslope = np.arange(extraz, dtype=np.float32) / extraz
         blend = np.transpose(
@@ -136,26 +137,23 @@ def structillum_3d(
 
     # adding a single pixel to z and removing to make focal plane centered
     shape_2d = (shape[0] + 1, int(np.ceil(shape[1] * 1.55)))
-    ill_2d = structillum_2d(shape_2d, *args, **kwargs).sum(0)[:-1]
+    ill_2d = structillum_2d(shape_2d, *args, **kwargs)[:-1]
     # ill_3d = xp.repeat(ill_2d[:, :, xp.newaxis], np.int(shape[2] * np.sqrt(2)), axis=2)
 
     # ndimage.rotate(ill_3d, 45, (1, 2))
 
-    out = np.zeros((nangles, nphases, *shape), "single")  # APZYX shape
+    out = gpuarray.zeros((nangles, nphases, *shape), dtype=np.float32)  # APZYX shape
     for p in range(nphases):
-        shiftedIllum = shift(ill_2d, (defocus / dz, p * phaseshift / dx))
+        shiftedIllum = shift(ill_2d, (defocus / dz, p * phaseshift / dx)).get()
         ill_3d = np.repeat(
             shiftedIllum[:, :, np.newaxis], np.ceil(shape[2] * np.sqrt(2)), axis=2
         )
-
         for a, angle in enumerate(angles):
             print(f"p: {p}, a: {a}")
             if angle == 0:
                 rotatedillum = ill_3d
             else:
-                pycuda.autoinit.context.push()
-                rotatedillum = rotate(ill_3d, np.rad2deg(angle), mode="linear").get()
-                pycuda.autoinit.context.pop()
+                rotatedillum = rotate(ill_3d, np.rad2deg(angle), mode="linear")
             out[a, p] = crop_center(rotatedillum, nx, ny)
     return out
 
