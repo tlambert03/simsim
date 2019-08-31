@@ -1,4 +1,4 @@
-__global__ void bresenham3D(int nrows, int *points, int *out) {
+__global__ void bresenham3D(int nrows, int depth, int *points, int *out) {
   int row = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (row >= nrows)
@@ -57,6 +57,8 @@ __global__ void bresenham3D(int nrows, int *points, int *out) {
       out[offset + 1] = y1;
       out[offset + 2] = z1;
       outN += 1;
+      if (outN >= depth)
+        return;
       offset = (row * width) + (outN * nrows * width);
     }
   } else if (dy >= dx && dy >= dz) {
@@ -80,6 +82,8 @@ __global__ void bresenham3D(int nrows, int *points, int *out) {
       out[offset + 1] = y1;
       out[offset + 2] = z1;
       outN += 1;
+      if (outN >= depth)
+        return;
       offset = (row * width) + (outN * nrows * width);
     }
   } else {
@@ -103,6 +107,8 @@ __global__ void bresenham3D(int nrows, int *points, int *out) {
       out[offset + 1] = y1;
       out[offset + 2] = z1;
       outN += 1;
+      if (outN >= depth)
+        return;
       offset = (row * width) + (outN * nrows * width);
     }
   }

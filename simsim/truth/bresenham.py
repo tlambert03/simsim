@@ -1,4 +1,4 @@
-from simsim.cuda import initpycuda
+#from simsim.cuda import initpycuda
 from pycuda.compiler import SourceModule
 import numpy as np
 import pycuda.driver as cuda
@@ -23,9 +23,10 @@ def bresenham_3D(vertices, max_out=512):
 
     numpairs = len(vertices)
     vert_gpu = gpuarray.to_gpu(np.ascontiguousarray(vertices.astype(np.int32)))
-    out = np.ones((max_out, numpairs, 3), dtype=np.int32, order="C") * -1
+    out = np.ones((int(max_out), numpairs, 3), dtype=np.int32, order="C") * -1
     _bresenham3D(
         np.int32(numpairs),
+        np.int32(max_out),
         vert_gpu,
         cuda.InOut(out),
         block=(256, 1, 1),
