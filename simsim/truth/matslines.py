@@ -1,5 +1,5 @@
 import numpy as np
-from simsim.cuda.bresenham import bresenham_3D
+from .bresenham import bresenham_3D
 
 
 def _mats_vertices(shape=(64, 256, 256), density=10, length=10, horiZ=10):
@@ -46,7 +46,8 @@ def _enforce_ellipse(array):
 
 def matslines3D(shape=(64, 256, 256), density=10, length=10, horiZ=10):
     vertices = _mats_vertices(shape, density, length, horiZ)
-    coords = bresenham_3D(vertices).reshape((-1, 3))
+    max_depth = np.sqrt(np.square(shape).sum()) * 0.8
+    coords = bresenham_3D(vertices, max_out=max_depth).reshape((-1, 3))
     unique, counts = np.unique(coords, axis=0, return_counts=True)
     # the first item will be the empty stuff returned from bresenham_3d
     assert np.all(unique[0] == -1)
