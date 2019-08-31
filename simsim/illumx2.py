@@ -1,5 +1,5 @@
 import numpy as np
-from simsim.cuda.transform import rotate
+from simsim.transform import rotate, shift
 from pycuda import cumath, gpuarray
 
 
