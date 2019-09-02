@@ -149,7 +149,7 @@ def structillum_3d(
 
     out = np.zeros((nangles, nphases, *shape), "single")  # APZYX shape
     for p in range(nphases):
-        shiftedIllum = shift(ill_2d, (defocus / dz, p * phaseshift / dx))
+        shiftedIllum = shift(ill_2d, (defocus / dz, - p * phaseshift / dx))
         ill_3d = np.repeat(
             shiftedIllum[:, :, np.newaxis], np.ceil(shape[2] * np.sqrt(2)), axis=2
         )

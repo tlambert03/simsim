@@ -24,6 +24,12 @@ def check_mem():
 
 def main():
 
+    out_nx = 64
+    out_nz = 11
+    upscale_xy = 8
+    upscale_z = 5
+    out_ny = out_nx
+
     nimm = 1.515
     NA = 1.42
     csthick = 0.170
@@ -33,17 +39,12 @@ def main():
     illum_contrast = 1
     exwave = 0.488
     emwave = 0.528
-    angles = [-0.804300, 0.238800, -1.855500]
+    angles = [0, -1.855500, 0.238800]
     linespacing = 0.2035
     nphases = 5
 
-    out_nx = 256
-    out_ny = 256
-    out_nz = 11
     out_dx = 0.08
     out_dz = 0.125
-    upscale_xy = 8
-    upscale_z = 5
     assert out_nz % 2 == 1 and upscale_z % 2 == 1, "out_nz and upscale_z must be odd"
     truth_nx = out_nx * upscale_xy
     truth_ny = out_ny * upscale_xy
@@ -51,14 +52,14 @@ def main():
     truth_dx = out_dx / upscale_xy
     truth_dz = out_dz / upscale_z
 
-    check_mem()
+    # check_mem()
 
     print("making truth")
     truth = matslines.matslines3D((truth_nz, truth_ny, truth_nx), density=5).astype(
         np.float32
     )
     print("done with truth")
-    check_mem()
+    # check_mem()
     print("making illum")
     illum_shape = (truth_nz + out_nz // 2 * upscale_z * 2, truth_ny, truth_nx)
     illum = structillum_3d(
@@ -74,7 +75,7 @@ def main():
         wvl=exwave,
     )
 
-    check_mem()
+    # check_mem()
     print("norm illum")
     if isinstance(illum, gpuarray.GPUArray):
         # normalize
@@ -90,7 +91,7 @@ def main():
         illum *= max(0, min(illum_contrast, 1))
         illum += 1 - illum.max()
 
-    check_mem()
+    # check_mem()
     print("making psf")
     _psf = psf(
         nxy=truth_nx,
@@ -105,27 +106,27 @@ def main():
     )
     _psf /= _psf.sum()
 
-    check_mem()
+    # check_mem()
     print("starting conv illum")
     thr = Thread(pycuda.autoinit.context)
     print("thread created")
-    check_mem()
+    # check_mem()
 
     out = np.empty((len(angles), nphases, out_nz, out_ny, out_nx), np.float32)
 
     truth_gpu = gpuarray.to_gpu(truth)
     print("truth transferred ")
-    check_mem()
+    # check_mem()
     otf_gpu = gpuarray.to_gpu(_psf.astype(np.complex64))
     print("otf transferred ")
-    check_mem()
+    # check_mem()
     do_fft = fft.FFT(otf_gpu).compile(thr, fast_math=True)
     do_fft_shift = fft.FFTShift(otf_gpu).compile(thr, fast_math=True)
     print("plans created ")
-    check_mem()
+    # check_mem()
     do_fft(otf_gpu, otf_gpu, inverse=0)
     print("otf fft performed ")
-    check_mem()
+    # check_mem()
     for plane in range(out_nz):
 
         start = plane * upscale_z
@@ -134,7 +135,7 @@ def main():
         # print(f"extracting plane {need_plane}")
         for angle in range(len(angles)):
             for phase in range(nphases):
-                # print(f"plane: {plane}, angle: {angle}, phase: {phase}")
+                print(f"plane: {plane}, angle: {angle}, phase: {phase}")
                 # check_mem()
                 temp = gpuarray.to_gpu(illum[angle, phase, start : start + truth_nz])
                 # print("temp illum created ")
@@ -197,7 +198,29 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import mrc
 
-    out = main()
-    _out = np.transpose(out, (0, 2, 1, 3, 4)).reshape((-1, out.shape[3], out.shape[4]))
-    mrc.save(_out, "/Users/talley/Desktop/test.dv")
+    plt.ion()
 
+    out = main()
+
+    _out = np.transpose(out, (0, 2, 1, 4, 3)).reshape((-1, out.shape[3], out.shape[4]))
+    _out = np.ascontiguousarray(np.fliplr(_out))
+    mrc.save(
+        _out,
+        "/Users/talley/Desktop/ss/py.dv",
+        metadata={"wave0": 528, "dxy": 0.08, "dz": 0.125, "LensNum": 10612},
+    )
+    mrc.save(
+        _psf.astype('single'),
+        "/Users/talley/Desktop/ss/psf_py.dv",
+        metadata={"wave0": 528, "dxy": truth_dx, "dz": truth_dz, "LensNum": 10612},
+    )
+
+
+def compare():
+
+    im_mat = mrc.imread("/Users/talley/Desktop/ss/mat.dv")[:55][::5]
+    im_py = mrc.imread("/Users/talley/Desktop/ss/py.dv")[:55][::5]
+    im_matf = np.fft.fftshift(np.abs(np.fft.fftn(im_mat)))
+    im_pyf = np.fft.fftshift(np.abs(np.fft.fftn(im_py)))
+    tf.imshow(np.log2(im_pyf))
+    plt.show()
