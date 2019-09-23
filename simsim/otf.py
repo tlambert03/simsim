@@ -1,95 +1,73 @@
-from simsim.illum_pycuda import structillum_3d_tex, structillum_3d
-from simsim.psf import psf
-import mrc
+from simsim.psf import PSF
+from simsim.illum import SIMIllum
+
 import numpy as np
 from skimage.transform import downscale_local_mean
-import tifffile as tf
-import matplotlib.pyplot as plt
-
-plt.ion()
 
 
-def crop_center(img, cropx, cropy):
-    z, y, x = img.shape
-    startx = x // 2 - (cropx // 2)
-    starty = y // 2 - (cropy // 2)
-    return img[:, starty : starty + cropy, startx : startx + cropx]
+def make_otf(
+    shape=(65, 256, 256),
+    wvl=0.525,
+    dx=0.08,
+    dz=0.125,
+    upscale_x=1,
+    nimm=1.515,
+    NA=1.42,
+    pattern_defocus=0,
+    modulation_contrast=1,
+    sample_ri=1.515,
+    pz=0,
+    angle=0,
+    nphases=5,
+    linespacing=0.2305,
+    outpath=None,
+):
+    truth_nz, out_nxy, out_nxy = shape
+    truth_nxy = out_nxy * upscale_x
+    truth_dx = dx / upscale_x
+    truth_dz = dz
 
+    params = {
+        "NA": NA,  # numerical aperture
+        "ng0": 1.515,  # coverslip RI design value
+        "ng": 1.515,  # coverslip RI experimental value
+        "ni0": 1.515,  # immersion medium RI design value
+        "ni": nimm,  # immersion medium RI experimental value
+        "ns": sample_ri,  # specimen refractive index (RI)
+        "ti0": 150,  # microns, working distance (immersion medium thickness) design value
+        "tg": 170,  # microns, coverslip thickness experimental value
+        "tg0": 170,  # microns, coverslip thickness design value
+    }
 
-out_dx = 0.08
-out_dz = 0.125
-out_nxy = 256
-upscale_xy = 8
-truth_nxy = out_nxy * upscale_xy
-truth_nz = 65
-truth_dx = out_dx / upscale_xy
-truth_dz = out_dz
+    psf = PSF(shape, params, truth_dx, truth_dz, pz, wvl)
+    illum = SIMIllum(
+        (truth_nz, 1, 1),
+        truth_dx,
+        truth_dz,
+        [angle],
+        nphases,
+        linespacing,
+        pattern_defocus,
+        modulation_contrast,
+        NA,
+        nimm,
+        wvl,
+    )
+    otf = psf.data[np.newaxis, np.newaxis] * illum.data
+    otf = otf.transpose((0, 2, 1, 4, 3)).reshape((-1, truth_nxy, truth_nxy))
+    otf = downscale_local_mean(otf, (1, upscale_x, upscale_x)).astype("float32")
+    if outpath:
+        import mrc
 
-nimm = 1.515
-NA = 1.42
-csthick = 0.170
-sample_ri = 1.426
-gratingDefocus = 0
-
-# print("making psf")
-# _psf = psf(
-#     nxy=truth_nxy,
-#     nz=truth_nz,
-#     dz=truth_dz,
-#     dxy=truth_dx,
-#     wvl=emwave,
-#     NA=NA,
-#     csthick=csthick,
-#     nimm=1.515,
-#     sample_ri=sample_ri,
-# )
-# _psf /= _psf.sum()
-
-_psf = crop_center(
-    mrc.imread(
-        "/Users/talley/python/simsim/_local/psf_010x125nm_142NA_528nm_1515nimm_146sampRI.dv"
-    ),
-    truth_nxy,
-    truth_nxy,
-)
-
-_psf = np.tile(_psf, (5, 1, 1, 1))
-
-illum_contrast = 1
-exwave = 0.488
-emwave = 0.528
-angles = [0]
-linespacing = 0.2035
-nphases = 5
-
-
-print("making illum")
-nxyillum = 1
-illum_shape = (truth_nz, nxyillum, nxyillum)
-illum = structillum_3d_tex(
-    illum_shape,
-    angles,
-    nphases,
-    linespacing=linespacing,
-    dx=truth_dx,
-    dz=truth_dz,
-    defocus=gratingDefocus,
-    NA=NA,
-    nimm=nimm,
-    wvl=exwave,
-)[0]
-
-illum = illum[:, :, nxyillum // 2, nxyillum // 2, np.newaxis, np.newaxis].get()
-
-illum = np.squeeze(np.tile(illum, (1, 1, 1, truth_nxy, truth_nxy)))
-out = np.transpose((_psf * illum), (1, 0, 2, 3)).reshape((-1, truth_nxy, truth_nxy))
-# out = np.transpose((_psf), (1, 0, 2, 3)).reshape((-1, truth_nxy, truth_nxy))
-
-# out = (_psf * illum)[0].reshape((-1, truth_nxy, truth_nxy))
-final = downscale_local_mean(out, (1, upscale_xy, upscale_xy))
-
-mrc.imsave(
-    "/Users/talley/Desktop/psf.dv",
-    final.astype(np.float32),
-    metadata={"dx": out_dx, "dy": out_dx, "dz": out_dz, "wave0": 1000 * emwave},
-)
+        mrc.imsave(
+            outpath,
+            otf,
+            metadata={
+                "dx": dx,
+                "dy": dx,
+                "dz": dz,
+                "wave0": 1000 * wvl,
+                "LensNum": 10612,
+            },
+        )
+    return otf
