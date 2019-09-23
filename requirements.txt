@@ -1,0 +1,7 @@
+tifffile
+mrc
+numpy
+tqdm
+psfmodels
+pycuda
+reikna
