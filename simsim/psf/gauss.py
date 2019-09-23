@@ -45,7 +45,7 @@ def gauss3d_kernel(shape=(100, 128, 128), sigx=1, sigz=2):
     return a
 
 
-def gauss_psf(nxy=128, nz=128, dz=0.1625, dxy=0.1625, wvl=0.55, NA=0.8):
+def gauss_psf(nxy=128, nz=128, dz=0.1625, dxy=0.1625, wvl=0.55, NA=0.8, **kwargs):
     sigx = ((0.61 * wvl / NA) / 2.355) / dxy
     sigz = ((2 * wvl / NA ** 2) / 2.355) / dz
     psf = gauss3d_kernel((nz, nxy, nxy), sigx, sigz)

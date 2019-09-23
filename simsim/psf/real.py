@@ -11,8 +11,9 @@ def real_psf(
     NA=1.42,
     mag=100,
     nimm=1.515,
-    sample_ri=1.33,
+    sample_ri=1.42,
     csthick=0.170,
+    ti0=150,
 ):
     params = {
         "M": mag,  # magnification
@@ -22,12 +23,12 @@ def real_psf(
         "ni0": 1.515,  # immersion medium RI design value
         "ni": nimm,  # immersion medium RI experimental value
         "ns": sample_ri,  # specimen refractive index (RI)
-        "ti0": 150,  # microns, working distance (immersion medium thickness) design value
+        "ti0": ti0,  # microns, working distance (immersion medium thickness) design value
         "tg": csthick * 1000,  # microns, coverslip thickness experimental value
         "tg0": 170,  # microns, coverslip thickness design value
         "zd0": 200.0 * 1.0e3,  # microscope tube length (in microns).
     }
-    zv = np.arange(-nz // 2, nz // 2) * dz
+    zv = np.arange(-(nz - 1) // 2, (nz + 1) // 2) * dz
     psf = mpsf.gLXYZFocalScan(
         params, dxy, nxy, zv, normalize=True, pz=0.0, wvl=wvl, zd=None
     )
