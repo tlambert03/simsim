@@ -4,7 +4,7 @@ from pycuda import gpuarray
 import numpy as np
 import os
 
-import pycuda.autoinit  # noqa
+# import simsim.cuda.initpycuda # noqa
 
 cubic_dir = os.path.join(os.path.dirname(__file__), "cubic")
 with open(__file__.replace(".py", ".cu"), "r") as f:
