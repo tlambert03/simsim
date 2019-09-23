@@ -218,18 +218,6 @@ def structillum_3d(
     return out
 
 
-def structillum_3d_with_fallback(*args, **kwargs):
-    try:
-        return structillum_3d(*args, **kwargs)
-    except OutOfMemoryError:
-        print("out of gpu memory falling back to cpu")
-        kwargs["xp"] = np
-        return structillum_3d(*args, **kwargs)
-
-
-structillum_3d_with_fallback.__doc__ = structillum_3d.__doc__
-
-
 source = r"""
 extern "C"{
     __global__ void readTex(float *output, cudaTextureObject_t texObj, float *mat,
@@ -380,3 +368,18 @@ def structillum_3d_tex(
                     read_coords(shape, per, matrix[:2], output=out[a, p])
                 pbar.update(1)
     return out
+
+
+def structillum_3d_with_fallback(*args, **kwargs):
+    try:
+        return structillum_3d_tex(*args, transfer=True, **kwargs)
+    except ImportError:
+        return structillum_3d(*args, **kwargs)
+    except OutOfMemoryError:
+        print("out of gpu memory falling back to cpu")
+        kwargs["xp"] = np
+        return structillum_3d(*args, **kwargs)
+
+
+structillum_3d_with_fallback.__doc__ = structillum_3d.__doc__
+

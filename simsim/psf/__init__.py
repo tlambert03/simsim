@@ -38,7 +38,8 @@ class PSF:
         trimx = -(self.nx % 2 - 1)
         psf_nz = self.nz - trimz
         psf_nx = self.nx - trimx
-        self.params["NA"] = self.params.pop("na")
+        if 'na' in self.params:
+            self.params["NA"] = self.params.pop("na")
         psf = self.model(
             psf_nz,
             dz=self.dz,
