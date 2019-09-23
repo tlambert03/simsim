@@ -1,14 +1,13 @@
 import numpy as np
-from .bresenham import bresenham_3D
 
 
 def _mats_vertices(shape=(64, 256, 256), density=10, length=10, horiZ=10):
     nz, ny, nx = shape
-    numlines = nx * density
+    numlines = nx * int(density)
 
     alpha = np.random.rand(numlines) * 2 * np.pi  # random set of angles
     alphaz = (
-        np.pi / 2 + np.random.rand(numlines) * np.pi / horiZ
+        np.pi / 2 + np.random.rand(numlines) * np.pi / int(horiZ)
     )  # random set of angles
 
     xypad = 3
@@ -19,7 +18,7 @@ def _mats_vertices(shape=(64, 256, 256), density=10, length=10, horiZ=10):
     z1 = np.round(zpad + (nz - zpad) * np.random.rand(numlines))
 
     # find other end of line given alpha and length
-    lens = nx / 20 + length * ny / 20 * np.random.rand(numlines)
+    lens = nx / 20 + int(length) * ny / 20 * np.random.rand(numlines)
     x2 = np.maximum(
         np.minimum(np.round(x1 + np.sin(alphaz) * np.cos(alpha) * lens), nx), 2
     )
@@ -45,6 +44,8 @@ def _enforce_ellipse(array):
 
 
 def matslines3D(shape=(64, 256, 256), density=10, length=10, horiZ=10):
+    from .bresenham import bresenham_3D
+    
     vertices = _mats_vertices(shape, density, length, horiZ)
     max_depth = np.sqrt(np.square(shape).sum()) * 0.8
     coords = bresenham_3D(vertices, max_out=max_depth).reshape((-1, 3))

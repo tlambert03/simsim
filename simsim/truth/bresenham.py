@@ -1,4 +1,4 @@
-#from simsim.cuda import initpycuda
+# import simsim.cuda.initpycuda
 from pycuda.compiler import SourceModule
 import numpy as np
 import pycuda.driver as cuda
