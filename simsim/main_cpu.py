@@ -1,5 +1,5 @@
 # from simsim.cuda import initpycuda
-import pycuda.autoinit
+# import simsim.cuda.initpycuda
 from simsim.truth import matslines
 import numpy as np
 from simsim.illum import structillum_3d
@@ -14,6 +14,13 @@ from simsim.transform import zoom
 free_mem = cuda.mem_get_info()[0]
 
 
+def crop_center(img, cropx, cropy):
+    z, y, x = img.shape
+    startx = x // 2 - (cropx // 2)
+    starty = y // 2 - (cropy // 2)
+    return img[:, starty : starty + cropy, startx : startx + cropx]
+
+
 def check_mem():
     global free_mem
     newmem = cuda.mem_get_info()
@@ -24,8 +31,8 @@ def check_mem():
 
 def main():
 
-    out_nx = 64
-    out_nz = 11
+    out_nx = 128
+    out_nz = 15
     upscale_xy = 8
     upscale_z = 5
     out_ny = out_nx
@@ -39,7 +46,7 @@ def main():
     illum_contrast = 1
     exwave = 0.488
     emwave = 0.528
-    angles = [0, -1.855500, 0.238800]
+    angles = [-0.8043, -1.855500, 0.238800]
     linespacing = 0.2035
     nphases = 5
 
@@ -55,7 +62,7 @@ def main():
     # check_mem()
 
     print("making truth")
-    truth = matslines.matslines3D((truth_nz, truth_ny, truth_nx), density=5).astype(
+    truth = matslines.matslines3D((truth_nz, truth_ny, truth_nx), density=2).astype(
         np.float32
     )
     print("done with truth")
@@ -106,9 +113,13 @@ def main():
     )
     _psf /= _psf.sum()
 
+    # _psf = crop_center(
+    #     tf.imread("/Users/talley/python/simsim/_local/psf.tif"), truth_nx, truth_ny
+    # )
+
     # check_mem()
     print("starting conv illum")
-    thr = Thread(pycuda.autoinit.context)
+    thr = Thread(simsim.cuda.initpycuda.context)
     print("thread created")
     # check_mem()
 
@@ -210,7 +221,7 @@ if __name__ == "__main__":
         metadata={"wave0": 528, "dxy": 0.08, "dz": 0.125, "LensNum": 10612},
     )
     mrc.save(
-        _psf.astype('single'),
+        _psf.astype("single"),
         "/Users/talley/Desktop/ss/psf_py.dv",
         metadata={"wave0": 528, "dxy": truth_dx, "dz": truth_dz, "LensNum": 10612},
     )
