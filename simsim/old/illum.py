@@ -1,21 +1,10 @@
 import numpy as np
-from scipy.ndimage import shift
+from scipy.ndimage import shift, rotate
 
 
 def expfield_2d(kvec, zarr, xarr, dx, dz):
     field = np.exp(1j * 2 * np.pi * (kvec[0] * xarr * dx + kvec[1] * zarr * dz))
     return field
-
-
-def _single_period(*args, **kwargs):
-    resolution = 100
-    _dz = kwargs.get("dz", 0.01)
-    kwargs["linespacing"] = kwargs.get("linespacing", 0.2035)
-    kwargs["dx"] = kwargs["linespacing"] / resolution
-    kwargs["dz"] = kwargs["dx"]
-    args = list(args)
-    args[0] = (int(args[0][0] * _dz / kwargs["dz"]), 2 * resolution)
-    return structillum_2d(*args, **kwargs), kwargs["dx"]
 
 
 def structillum_2d(
@@ -153,6 +142,17 @@ def structillum_2d(
     else:
         return intensity
 
+def _single_period(*args, **kwargs):
+    resolution = 100
+    _dz = kwargs.get("dz", 0.01)
+    kwargs["linespacing"] = kwargs.get("linespacing", 0.2035)
+    kwargs["dx"] = kwargs["linespacing"] / resolution
+    kwargs["dz"] = kwargs["dx"]
+    args = list(args)
+    args[0] = (int(args[0][0] * _dz / kwargs["dz"]), 2 * resolution)
+    return structillum_2d(*args, **kwargs), kwargs["dx"]
+
+
 
 def crop_center(img, cropx, cropy):
     z, y, x = img.shape
@@ -172,7 +172,6 @@ def structillum_3d(
     *args,
     **kwargs,
 ):
-    from .transform import rotate
 
     if isinstance(angles, (int, float)):
         # if a single number is provided, assume it is the first of three
@@ -203,7 +202,7 @@ def structillum_3d(
             if angle == 0:
                 rotatedillum = ill_3d
             else:
-                rotatedillum = rotate(ill_3d, np.rad2deg(angle), mode="linear").get()
+                rotatedillum = rotate(ill_3d, np.rad2deg(angle))
             out[a, p] = crop_center(rotatedillum, nx, ny)
     return out
 

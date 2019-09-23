@@ -3,7 +3,7 @@ import numpy as np
 from scipy.ndimage import shift
 from simsim.cuda.transform import rotate
 # from simsim.cuda.transform import rotate
-import pycuda.autoinit
+# import simsim.cuda.initpycuda
 
 try:
     import cupy as xp
@@ -159,9 +159,9 @@ def structillum_3d(
             if angle == 0:
                 rotatedillum = ill_3d
             else:
-                pycuda.autoinit.context.push()
+                simsim.cuda.initpycuda.context.push()
                 rotatedillum = rotate(ill_3d, np.rad2deg(angle), mode="linear").get()
-                pycuda.autoinit.context.pop()
+                simsim.cuda.initpycuda.context.pop()
             out[a, p] = crop_center(rotatedillum, nx, ny)
     return out
 
